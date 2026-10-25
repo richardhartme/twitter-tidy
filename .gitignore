@@ -1,0 +1,7 @@
+node_modules
+dist
+.env*
+*.db
+.claude/
+# Planning notes and tickets stay local; see docs/agents/issue-tracker.md
+.scratch/
