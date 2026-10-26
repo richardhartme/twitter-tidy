@@ -16,6 +16,7 @@ import { AccountGrid, type GridColumn } from './account-grid.js';
 import { DetailPane } from './detail-pane.js';
 import { REMOVED_KEYS, RemovedTable } from './removed-table.js';
 import { StatusBar } from './status-bar.js';
+import { UnfollowPrompt } from './unfollow-prompt.js';
 
 interface FollowingTableProps {
   accounts: FollowedAccount[];
@@ -34,6 +35,8 @@ interface FollowingTableProps {
   onFetchStale: () => void;
   /** Fetches the last tweet for the rows marked with space (`b`). */
   onFetchMarked: (accounts: FollowedAccount[]) => void;
+  /** Unfollows one confirmed account (`u`), resolving to a status-bar message. */
+  onUnfollow: (account: FollowedAccount) => Promise<string>;
   /** Opens an account's profile in the system browser (`o`). */
   onOpenProfile: (account: AccountProfile) => void;
   /** No post within this long counts as inactive. Defaults to `DEFAULT_INACTIVITY_MS`. */
@@ -77,6 +80,7 @@ const TABLE_KEYS = [
   'enter details',
   'o open',
   'l last tweet',
+  'u unfollow',
   'space mark',
   'b/a fetch marked/stale',
   'r refresh',
@@ -84,7 +88,7 @@ const TABLE_KEYS = [
   'q quit',
 ];
 const SEARCH_KEYS = ['type to search', 'enter keep', 'esc clear'];
-const DETAIL_KEYS = ['o open', 'esc back', 'q quit'];
+const DETAIL_KEYS = ['o open', 'u unfollow', 'esc back', 'q quit'];
 const NO_FOLLOWERS_HINT = 'Follow-back is unknown until your followers have been pulled';
 const NO_MARKS_HINT = 'Mark rows with space, then press b to fetch their last tweets';
 
@@ -100,6 +104,7 @@ export function FollowingTable({
   onFetchLastPost,
   onFetchStale,
   onFetchMarked,
+  onUnfollow,
   onOpenProfile,
   inactiveAfterMs,
   now = Date.now,
@@ -158,6 +163,25 @@ export function FollowingTable({
     });
   };
 
+  /** The account `u` is asking about; table keys rest while the prompt shows. */
+  const [confirming, setConfirming] = useState<FollowedAccount | null>(null);
+  /** Whether an unfollow is in flight (one at a time). */
+  const [unfollowing, setUnfollowing] = useState(false);
+  const askUnfollow = (account: FollowedAccount | undefined) => {
+    if (!account || unfollowing) return;
+    setDetail(false);
+    setConfirming(account);
+  };
+  const unfollow = (account: FollowedAccount) => {
+    setConfirming(null);
+    setUnfollowing(true);
+    setHint(`Unfollowing @${account.handle}…`);
+    void onUnfollow(account).then((message) => {
+      setUnfollowing(false);
+      setHint(message);
+    });
+  };
+
   /** The account in the detail pane, if it is open (only from the Following view). */
   const open = detail ? rows[cursor] : undefined;
 
@@ -172,6 +196,7 @@ export function FollowingTable({
     if (open) {
       if (key.escape) setDetail(false);
       else if (input === 'o') openProfile(open);
+      else if (input === 'u') askUnfollow(open);
       else if (input === 'q') onQuit();
       return;
     }
@@ -198,6 +223,7 @@ export function FollowingTable({
     if (showRemoved) return;
     if (key.return) return setDetail(rows.length > 0);
     if (input === 'l') return fetchLastPost(rows[cursor]);
+    if (input === 'u') return askUnfollow(rows[cursor]);
     if (input === ' ') {
       const row = rows[cursor];
       if (!row) return;
@@ -224,8 +250,13 @@ export function FollowingTable({
     if (column) {
       reshape(() => setSort((s) => ({ key: column.key, descending: s.key === column.key ? !s.descending : false })));
     }
-  });
+  }, { isActive: !confirming });
 
+  if (confirming) {
+    return (
+      <UnfollowPrompt accounts={[confirming]} onConfirm={() => unfollow(confirming)} onCancel={() => setConfirming(null)} />
+    );
+  }
   if (open) {
     return (
       <Box flexDirection="column">

@@ -13,6 +13,8 @@ export const PRICES = {
   postRead: 0.005,
   /** One read of the user's own data (e.g. `/2/users/me`). Confirm in the Developer Console. */
   ownedRead: 0.001,
+  /** One unfollow, assumed to be billed as "Interaction: Delete". Unconfirmed: check the Developer Console. */
+  unfollow: 0.01,
 } as const;
 
 export interface BulkFetchEstimate {

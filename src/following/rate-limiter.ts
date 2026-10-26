@@ -22,6 +22,8 @@ export interface AcquireOptions {
 export interface RateLimiter {
   /** Resolves once one more call fits in the window, and counts it; rejects if `signal` aborts. */
   acquire(options?: AcquireOptions): Promise<void>;
+  /** Counts a call and returns null if one fits now; otherwise returns when one will (epoch milliseconds), without waiting. */
+  tryAcquire(): number | null;
 }
 
 const abortableSleep = (ms: number, signal?: AbortSignal) =>
@@ -46,21 +48,26 @@ export function createRateLimiter({
 }: RateLimiterOptions = {}): RateLimiter {
   /** Times of the calls still inside the window, oldest first. */
   const calls: number[] = [];
+  const take = () => {
+    const t = now();
+    while (calls.length > 0 && calls[0]! <= t - windowMs) calls.shift();
+    if (calls.length < limit) {
+      calls.push(t);
+      return null;
+    }
+    return calls[0]! + windowMs;
+  };
   return {
     async acquire({ signal, onWait } = {}) {
       for (;;) {
         if (signal?.aborted) throw aborted();
-        const t = now();
-        while (calls.length > 0 && calls[0]! <= t - windowMs) calls.shift();
-        if (calls.length < limit) {
-          calls.push(t);
-          return;
-        }
-        const resumeAt = calls[0]! + windowMs;
+        const resumeAt = take();
+        if (resumeAt === null) return;
         onWait?.(resumeAt);
-        await sleep(resumeAt - t, signal);
+        await sleep(resumeAt - now(), signal);
       }
     },
+    tryAcquire: take,
   };
 }
 

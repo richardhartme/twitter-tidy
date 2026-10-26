@@ -3,9 +3,9 @@ import { describe, expect, test, vi } from 'vitest';
 import { App } from '../src/app.js';
 import type { XClient } from '../src/auth/index.js';
 import { openCache, type AccountProfile } from '../src/cache/index.js';
-import { createRateLimiter } from '../src/following/index.js';
+import { createRateLimiter, type RateLimiter } from '../src/following/index.js';
 
-const json = (body: unknown) => new Response(JSON.stringify(body));
+const json = (body: unknown, init?: ResponseInit) => new Response(JSON.stringify(body), init);
 const xUser = (id: string) => ({ id, username: `user${id}`, name: `User ${id}` });
 
 const profile = (id: string): AccountProfile => ({
@@ -328,5 +328,106 @@ describe('Open profile (o)', () => {
     await press(stdin, 'o');
     expect(openUrl).toHaveBeenCalledWith(`https://x.com/${profile('2').handle}`);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('Unfollow one account (u)', () => {
+  const DOWN = '\u001B[B';
+  const ENTER = '\r';
+
+  function setupUnfollow(
+    respond: () => Response = () => json({ data: { following: false } }),
+    { protectedIds = [] as string[], unfollowLimiter = undefined as RateLimiter | undefined } = {},
+  ) {
+    const cache = openCache({ path: ':memory:' });
+    cache.applyFollowing(['1', '2', '3'].map((id) => ({ ...profile(id), protected: protectedIds.includes(id) })));
+    const fetch = vi.fn(async (_path: string, _init?: RequestInit) => respond());
+    const client = { fetch, tokens: {} } as unknown as XClient;
+    const app = render(<App client={client} cache={cache} userId="42" height={5} unfollowLimiter={unfollowLimiter} />);
+    const deletes = () => fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE').map(([path]) => path);
+    return { ...app, fetch, cache, deletes };
+  }
+
+  test('asks first, with the cost; anything but y cancels without a call', async () => {
+    const { stdin, lastFrame, deletes } = setupUnfollow();
+    await tick();
+    await press(stdin, DOWN);
+    await press(stdin, 'u');
+    expect(lastFrame()).toContain('Unfollow @user2?');
+    expect(lastFrame()).toContain('About $0.01');
+    // No is the default: Enter cancels.
+    await press(stdin, ENTER);
+    expect(lastFrame()).not.toContain('Unfollow @user2?');
+    expect(lastFrame()).toContain('@user2');
+    await press(stdin, 'u');
+    await press(stdin, 'n');
+    expect(lastFrame()).toContain('@user2');
+    expect(deletes()).toEqual([]);
+  });
+
+  test('y unfollows, the account leaves the table at once, and shows as unfollowed in the removed view', async () => {
+    const { stdin, lastFrame, deletes } = setupUnfollow();
+    await tick();
+    await press(stdin, DOWN);
+    await press(stdin, 'u');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toContain('Unfollowed @user2'));
+    expect(deletes()).toEqual(['/2/users/42/following/2']);
+    expect(lastFrame()).not.toContain('❯ @user2');
+    // The highlight stays at the same position, now on the next account.
+    expect(lastFrame()).toContain('❯ @user3');
+    await press(stdin, 'x');
+    expect(lastFrame()).toMatch(/@user2 .*unfollowed/);
+  });
+
+  test('warns that re-following a protected account needs their approval', async () => {
+    const { stdin, lastFrame } = setupUnfollow(undefined, { protectedIds: ['1'] });
+    await tick();
+    await press(stdin, 'u');
+    expect(lastFrame()).toContain('protected');
+    expect(lastFrame()).toContain('approval');
+  });
+
+  test('u in the detail pane asks, unfollows and returns to the table', async () => {
+    const { stdin, lastFrame, deletes } = setupUnfollow();
+    await tick();
+    await press(stdin, ENTER);
+    await press(stdin, 'u');
+    expect(lastFrame()).toContain('Unfollow @user1?');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toContain('Unfollowed @user1'));
+    expect(deletes()).toEqual(['/2/users/42/following/1']);
+    expect(lastFrame()).toContain('❯ @user2');
+  });
+
+  test('refuses without a call when the unfollow limit is used up, saying when to try again', async () => {
+    const unfollowLimiter = createRateLimiter({ limit: 1, windowMs: 15 * 60_000, now: () => Date.parse('2026-10-26T14:17:00') });
+    const { stdin, lastFrame, deletes } = setupUnfollow(undefined, { unfollowLimiter });
+    await tick();
+    await press(stdin, 'u');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toContain('Unfollowed @user1'));
+    await press(stdin, 'u');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toMatch(/try again at \S*:32/));
+    expect(deletes()).toHaveLength(1);
+    expect(lastFrame()).toContain('@user2');
+  });
+
+  test("X's own rate limit or refusal is reported, and the account stays", async () => {
+    const limited = setupUnfollow(() => new Response(null, { status: 429, headers: { 'x-rate-limit-reset': String(Date.parse('2026-10-26T09:05:00') / 1000) } }));
+    await tick();
+    await press(limited.stdin, 'u');
+    await press(limited.stdin, 'y');
+    await vi.waitFor(() => expect(limited.lastFrame()).toMatch(/try again at \S*:05/));
+    expect(limited.deletes()).toHaveLength(1);
+    expect(limited.lastFrame()).toContain('❯ @user1');
+
+    const refused = setupUnfollow(() => json({ detail: 'Not permitted.' }, { status: 403 }));
+    await tick();
+    await press(refused.stdin, 'u');
+    await press(refused.stdin, 'y');
+    await vi.waitFor(() => expect(refused.lastFrame()).toMatch(/Not permitted/));
+    expect(refused.lastFrame()).toContain('❯ @user1');
   });
 });

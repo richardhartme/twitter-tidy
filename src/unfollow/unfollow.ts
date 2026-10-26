@@ -1,5 +1,7 @@
 import type { RateLimitOptions, XClient } from '../auth/index.js';
 import type { AccountProfile, Cache } from '../cache/index.js';
+import type { RateLimiter } from '../following/index.js';
+import { clockTime } from '../format.js';
 
 /** X's per-user limit on unfollows: 50 requests per 15 minutes. */
 export const UNFOLLOW_RATE_LIMIT = { limit: 50, windowMs: 15 * 60_000 } as const;
@@ -73,4 +75,23 @@ export async function unfollowAccount({
     );
   }
   throw new UnfollowError(`X returned ${res.status} while unfollowing ${who}${why ? `: ${why}` : ''}.`, 'failed');
+}
+
+export interface UnfollowMessageOptions extends Omit<UnfollowAccountOptions, keyof RateLimitOptions> {
+  /** The app's unfollow limiter; a single unfollow never waits for it. */
+  limiter: RateLimiter;
+}
+
+/** Unfollows one account (`u`) at once, or refuses if the limit is used up, and describes the outcome for the status bar. */
+export async function unfollowMessage({ limiter, account, ...options }: UnfollowMessageOptions): Promise<string> {
+  const tryAgain = (at: number | undefined) => (at ? `; try again at ${clockTime(at)}` : '');
+  const resumeAt = limiter.tryAcquire();
+  if (resumeAt !== null) return `Unfollow limit reached${tryAgain(resumeAt)}`;
+  try {
+    await unfollowAccount({ ...options, account, maxRateLimitWaits: 0 });
+    return `Unfollowed @${account.handle}`;
+  } catch (err) {
+    if (!(err instanceof UnfollowError)) throw err;
+    return err.kind === 'rate-limited' ? `${err.message.replace(/\.$/, '')}${tryAgain(err.resetAt)}` : err.message;
+  }
 }

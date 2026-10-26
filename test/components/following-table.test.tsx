@@ -61,6 +61,7 @@ function setup(
       onFetchLastPost={onFetchLastPost}
       onFetchStale={vi.fn()}
       onFetchMarked={vi.fn()}
+      onUnfollow={vi.fn()}
       onOpenProfile={onOpenProfile}
     />,
   );

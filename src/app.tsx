@@ -9,6 +9,7 @@ import { FollowingTable, TABLE_CHROME } from './components/following-table.js';
 import { Header } from './components/header.js';
 import { LastPostBulkFetch } from './components/last-post-bulk-fetch.js';
 import { createRateLimiter, fetchLastPostMessage, type RateLimiter } from './following/index.js';
+import { UNFOLLOW_RATE_LIMIT, unfollowMessage } from './unfollow/index.js';
 
 /** Lines around the table: the app's padding, plus the header and its margin. */
 const APP_CHROME = 2 + 4;
@@ -36,6 +37,8 @@ interface AppProps {
    * stay under X's limit. Defaults to one at 900 per 15 minutes for the app's lifetime.
    */
   limiter?: RateLimiter;
+  /** Paces every unfollow (`u`, `U`) at X's 50 per 15 minutes, separately from the timeline reads. */
+  unfollowLimiter?: RateLimiter;
   /** Opens a URL in the system browser; injectable for tests. */
   openUrl?: (url: string) => void;
 }
@@ -47,9 +50,11 @@ export function App({
   height,
   inactiveAfterMs,
   limiter: injected,
+  unfollowLimiter: injectedUnfollow,
   openUrl = openInBrowser,
 }: AppProps) {
   const [limiter] = useState(() => injected ?? createRateLimiter());
+  const [unfollowLimiter] = useState(() => injectedUnfollow ?? createRateLimiter(UNFOLLOW_RATE_LIMIT));
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [screen, setScreen] = useState<Screen>('table');
@@ -110,6 +115,11 @@ export function App({
           onRefreshFollowers={() => setScreen('refresh-followers')}
           onFetchLastPost={async (account) => {
             const message = await fetchLastPostMessage({ client, limiter, cache, account, inactiveAfterMs });
+            reload();
+            return message;
+          }}
+          onUnfollow={async (account) => {
+            const message = await unfollowMessage({ client, cache, userId, account, limiter: unfollowLimiter });
             reload();
             return message;
           }}
