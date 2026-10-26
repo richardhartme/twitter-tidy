@@ -5,7 +5,7 @@ import type { Cache } from '../cache/index.js';
 import { estimateBulkFetch, PRICES } from '../cost/index.js';
 import { refreshFollowers, type FollowersSummary } from '../followers/index.js';
 import type { FetchProgress } from '../following/index.js';
-import { integer } from '../format.js';
+import { clockTime, integer } from '../format.js';
 import { ConfirmPrompt } from './confirm-prompt.js';
 
 export interface FollowersRefreshProps {
@@ -21,8 +21,6 @@ type Stage =
   | { name: 'pulling'; progress: FetchProgress | null; resumeAt: number | null }
   | { name: 'done'; summary: FollowersSummary }
   | { name: 'failed'; message: string };
-
-const clockTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** Confirms the cost, pulls the whole followers list into the cache and shows who follows back. */
 export function FollowersRefresh({ client, cache, userId, onDone }: FollowersRefreshProps) {

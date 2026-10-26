@@ -1,16 +1,13 @@
 import type { RateLimitOptions, XClient } from '../auth/index.js';
 import type { AccountProfile, Cache } from '../cache/index.js';
-import type { RateLimiter } from '../following/index.js';
+import { isAbort, type RateLimiter } from '../following/index.js';
 import { clockTime } from '../format.js';
 
 /** X's per-user limit on unfollows: 50 requests per 15 minutes. */
 export const UNFOLLOW_RATE_LIMIT = { limit: 50, windowMs: 15 * 60_000 } as const;
 
-/**
- * Why an unfollow didn't happen. `forbidden`: X refused (no write permission, or the plan doesn't
- * allow it); `rate-limited`: the limit is used up until `resetAt`; `failed`: anything else.
- */
-export type UnfollowErrorKind = 'forbidden' | 'rate-limited' | 'failed';
+/** Why an unfollow didn't happen. `rate-limited`: the limit is used up until `resetAt`; `failed`: anything else. */
+export type UnfollowErrorKind = 'rate-limited' | 'failed';
 
 export class UnfollowError extends Error {
   override name = 'UnfollowError';
@@ -57,7 +54,7 @@ export async function unfollowAccount({
     );
   } catch (err) {
     // A stopped run's wait for the limiter: leave it for the caller to treat as stopped.
-    if (err instanceof Error && err.name === 'AbortError') throw err;
+    if (isAbort(err)) throw err;
     throw new UnfollowError(`Couldn't unfollow ${who}: ${(err as Error).message}`, 'failed');
   }
   if (res.ok || res.status === 404) {
@@ -73,7 +70,7 @@ export async function unfollowAccount({
   if (res.status === 403) {
     throw new UnfollowError(
       `X refused to unfollow ${who}${why ? `: ${why}` : ''}. Check your X app has Read and write permission and your plan allows unfollowing.`,
-      'forbidden',
+      'failed',
     );
   }
   throw new UnfollowError(`X returned ${res.status} while unfollowing ${who}${why ? `: ${why}` : ''}.`, 'failed');

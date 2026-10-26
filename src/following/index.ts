@@ -4,7 +4,7 @@ export { checkLastPost, describeLastPostCheck, fetchLastPostMessage, POSTS_PER_C
 export type { CheckLastPostOptions, CheckLastPostOutcome, FetchLastPostMessageOptions } from './last-post.js';
 export { countLastPostFetches, fetchLastPosts } from './bulk-last-post.js';
 export type { BulkLastPostProgress, BulkLastPostSummary, FetchLastPostsOptions } from './bulk-last-post.js';
-export { createRateLimiter, pacedClient, TIMELINE_RATE_LIMIT } from './rate-limiter.js';
+export { createRateLimiter, isAbort, pacedClient, TIMELINE_RATE_LIMIT } from './rate-limiter.js';
 export type { AcquireOptions, RateLimiter, RateLimiterOptions } from './rate-limiter.js';
 export { isInactive } from './inactive.js';
 export { refreshFollowing } from './refresh.js';

@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { XClient } from '../auth/index.js';
 import type { AccountProfile, Cache } from '../cache/index.js';
 import { estimateBulkFetch, PRICES } from '../cost/index.js';
@@ -11,8 +11,9 @@ import {
   type BulkLastPostSummary,
   type RateLimiter,
 } from '../following/index.js';
-import { integer } from '../format.js';
+import { accountsText, clockTime, integer } from '../format.js';
 import { ConfirmPrompt } from './confirm-prompt.js';
+import { useBulkRun } from './use-bulk-run.js';
 
 interface LastPostBulkFetchProps {
   client: XClient;
@@ -27,15 +28,7 @@ interface LastPostBulkFetchProps {
   onDone: () => void;
 }
 
-type Stage =
-  | { name: 'confirm' }
-  | { name: 'running'; progress: BulkLastPostProgress | null; resumeAt: number | null; stopping: boolean }
-  | { name: 'done'; summary: BulkLastPostSummary }
-  | { name: 'failed'; message: string };
-
 const NO_CALLS_ESTIMATE = '$0.00, no API calls needed';
-const clockTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-const accountsText = (n: number) => `${integer.format(n)} ${n === 1 ? 'account' : 'accounts'}`;
 
 function summaryText({ done, total, fetched, recorded, skipped, failed, cancelled }: BulkLastPostSummary) {
   const parts = [`${integer.format(fetched)} fetched`];
@@ -62,50 +55,12 @@ export function LastPostBulkFetch({
   onDone,
 }: LastPostBulkFetchProps) {
   const [calls] = useState(() => countLastPostFetches(cache, accounts, { inactiveAfterMs }));
-  const [stage, setStage] = useState<Stage>({ name: 'confirm' });
-  const controller = useRef(new AbortController());
+  const { stage, start } = useBulkRun<BulkLastPostProgress, BulkLastPostSummary>(onDone);
+  const startFetching = () =>
+    start((hooks) => fetchLastPosts({ client, cache, accounts, inactiveAfterMs, limiter, ...hooks }));
 
-  // Ignore results that arrive after the screen has closed.
-  const live = useRef(true);
-  useEffect(
-    () => () => {
-      live.current = false;
-    },
-    [],
-  );
-
-  function start() {
-    const update = (patch: Partial<Extract<Stage, { name: 'running' }>>) =>
-      live.current && setStage((s) => (s.name === 'running' ? { ...s, ...patch } : s));
-    setStage({ name: 'running', progress: null, resumeAt: null, stopping: false });
-    fetchLastPosts({
-      client,
-      cache,
-      accounts,
-      inactiveAfterMs,
-      limiter,
-      signal: controller.current.signal,
-      onProgress: (progress) => update({ progress, resumeAt: null }),
-      onRateLimit: (resumeAt) => update({ resumeAt }),
-    }).then(
-      (summary) => live.current && setStage({ name: 'done', summary }),
-      (err: unknown) =>
-        live.current && setStage({ name: 'failed', message: err instanceof Error ? err.message : String(err) }),
-    );
-  }
-
-  useInput((input, key) => {
-    if (stage.name === 'running') {
-      // A second press while stopping leaves at once; the call in flight still records its result.
-      if (stage.stopping) return onDone();
-      if (key.escape || input === 'c') {
-        controller.current.abort();
-        setStage({ ...stage, stopping: true });
-      }
-      return;
-    }
-    if (stage.name === 'done' || stage.name === 'failed' || accounts.length === 0) onDone();
-  });
+  // With nothing to fetch there's no prompt, so any key returns.
+  useInput(() => onDone(), { isActive: accounts.length === 0 });
 
   if (accounts.length === 0) {
     return (
@@ -127,7 +82,7 @@ export function LastPostBulkFetch({
               ? NO_CALLS_ESTIMATE
               : estimateBulkFetch({ price: POSTS_PER_CHECK * PRICES.postRead, count: calls }).text
           }
-          onConfirm={start}
+          onConfirm={startFetching}
           onCancel={onDone}
         />
       );

@@ -22,10 +22,11 @@ export async function connect(
   { signIn }: ConnectOptions = {},
 ): Promise<XClient> {
   const deps = { fetch, now: Date.now, sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) };
+  const browserSignIn = (c: Config) => login(c, { ...deps, openBrowser: openInBrowser, log: console.error });
   let tokens = await store.load();
   if (!tokens || !hasEveryScope(tokens)) {
     if (tokens) console.error('TwitterTidy needs permission to unfollow, so you need to log in to X again.');
-    tokens = await (signIn ?? ((c) => login(c, { ...deps, openBrowser: openInBrowser, log: console.error })))(config);
+    tokens = await (signIn ?? browserSignIn)(config);
     await store.save(tokens);
   }
   return createXClient({ ...deps, config, store, tokens });

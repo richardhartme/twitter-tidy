@@ -54,7 +54,7 @@ describe('unfollowAccount', () => {
     const { run, following } = setup(json({ detail: 'You are not permitted to perform this action.' }, { status: 403 }));
     const err = await run().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UnfollowError);
-    expect(err).toMatchObject({ kind: 'forbidden' });
+    expect(err).toMatchObject({ kind: 'failed' });
     expect((err as Error).message).toMatch(/not permitted/);
     expect((err as Error).message).toMatch(/Read and write/);
     expect(following()).toEqual(['1', '2']);
@@ -111,7 +111,7 @@ describe('unfollowAccounts', () => {
       path.endsWith('/3') ? json({ detail: 'Not permitted.' }, { status: 403 }) : json({ data: { following: false } }),
     );
     const summary = await run();
-    expect(summary).toMatchObject({ done: 2, total: 5, cancelled: false, error: { kind: 'forbidden' } });
+    expect(summary).toMatchObject({ done: 2, total: 5, cancelled: false, error: { kind: 'failed', message: expect.stringMatching(/Read and write/) } });
     expect(following()).toEqual(['3', '4', '5']);
   });
 

@@ -16,12 +16,15 @@ interface UnfollowPromptProps {
   onCancel: () => void;
 }
 
+/** The length of X's unfollow window, in minutes. */
+const windowMinutes = UNFOLLOW_RATE_LIMIT.windowMs / 60_000;
+
 /** Minutes a batch waits at X's unfollow limit: each full window after the first. */
-const waitMinutes = (n: number) =>
-  (Math.ceil(n / UNFOLLOW_RATE_LIMIT.limit) - 1) * (UNFOLLOW_RATE_LIMIT.windowMs / 60_000);
+const waitMinutes = (n: number) => (Math.ceil(n / UNFOLLOW_RATE_LIMIT.limit) - 1) * windowMinutes;
 
 /** Asks y/N (No by default) before unfollowing, with what it covers and costs. */
 export function UnfollowPrompt({ accounts, hidden = 0, onConfirm, onCancel }: UnfollowPromptProps) {
+  // Unlike ConfirmPrompt, enter cancels: unfollowing can't be undone from here, so only `y` goes ahead.
   useInput((input) => (input === 'y' ? onConfirm() : onCancel()));
 
   const single = accounts.length === 1 ? accounts[0] : undefined;
@@ -44,7 +47,7 @@ export function UnfollowPrompt({ accounts, hidden = 0, onConfirm, onCancel }: Un
       {minutes > 0 && (
         <Text>
           Takes about {integer.format(minutes)} minutes at X&apos;s limit of {UNFOLLOW_RATE_LIMIT.limit} per{' '}
-          {UNFOLLOW_RATE_LIMIT.windowMs / 60_000} minutes
+          {windowMinutes} minutes
         </Text>
       )}
       <Text>Estimated cost: {estimateBulkFetch({ price: PRICES.unfollow, count: accounts.length }).text} (unconfirmed)</Text>

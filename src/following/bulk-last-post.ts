@@ -2,7 +2,7 @@ import type { XClient } from '../auth/index.js';
 import type { AccountProfile, Cache, InactivityOptions } from '../cache/index.js';
 import { FetchError } from './fetch.js';
 import { checkLastPost } from './last-post.js';
-import { createRateLimiter, pacedClient, type RateLimiter } from './rate-limiter.js';
+import { createRateLimiter, isAbort, pacedClient, type RateLimiter } from './rate-limiter.js';
 
 /** How many of `accounts` a last-post check would call X for: stale, readable, and with posts. */
 export function countLastPostFetches(cache: Cache, accounts: AccountProfile[], options: InactivityOptions = {}): number {
@@ -42,8 +42,6 @@ export interface FetchLastPostsOptions extends InactivityOptions {
   /** Called before a wait, for the limiter or a 429, with when the run resumes (epoch milliseconds). */
   onRateLimit?: (resumeAt: number) => void;
 }
-
-const isAbort = (err: unknown) => err instanceof Error && err.name === 'AbortError';
 
 /**
  * Checks the last post of each account in turn, recording each result as it arrives, so a stopped

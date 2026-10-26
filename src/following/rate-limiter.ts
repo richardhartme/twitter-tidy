@@ -39,6 +39,9 @@ const abortableSleep = (ms: number, signal?: AbortSignal) =>
 
 const aborted = () => new DOMException('The run was aborted', 'AbortError');
 
+/** Whether `err` is a stopped run's wait for the limiter. */
+export const isAbort = (err: unknown) => err instanceof Error && err.name === 'AbortError';
+
 /** A sliding-window limiter: never more than `limit` calls in any `windowMs`. */
 export function createRateLimiter({
   limit = TIMELINE_RATE_LIMIT.limit,

@@ -4,7 +4,7 @@ import type { XClient } from '../auth/index.js';
 import type { Cache } from '../cache/index.js';
 import { estimateBulkFetch, PRICES } from '../cost/index.js';
 import { refreshFollowing, type FetchProgress, type RefreshSummary } from '../following/index.js';
-import { integer } from '../format.js';
+import { clockTime, integer } from '../format.js';
 import { ConfirmPrompt } from './confirm-prompt.js';
 
 interface FollowingRefreshProps {
@@ -19,8 +19,6 @@ type Stage =
   | { name: 'pulling'; progress: FetchProgress | null; resumeAt: number | null }
   | { name: 'done'; summary: RefreshSummary }
   | { name: 'failed'; message: string };
-
-const clockTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** Confirms the cost, pulls the whole Following list into the cache and shows what changed. */
 export function FollowingRefresh({ client, cache, userId, onDone }: FollowingRefreshProps) {

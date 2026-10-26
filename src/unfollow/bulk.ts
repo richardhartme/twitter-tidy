@@ -1,6 +1,6 @@
 import type { XClient } from '../auth/index.js';
 import type { AccountProfile, Cache } from '../cache/index.js';
-import { createRateLimiter, pacedClient, type RateLimiter } from '../following/index.js';
+import { createRateLimiter, isAbort, pacedClient, type RateLimiter } from '../following/index.js';
 import { UNFOLLOW_RATE_LIMIT, unfollowAccount, UnfollowError } from './unfollow.js';
 
 export interface BulkUnfollowProgress {
@@ -30,8 +30,6 @@ export interface UnfollowAccountsOptions {
   /** Called before a wait, for the limiter or a 429, with when the run resumes (epoch milliseconds). */
   onRateLimit?: (resumeAt: number) => void;
 }
-
-const isAbort = (err: unknown) => err instanceof Error && err.name === 'AbortError';
 
 /**
  * Unfollows each account in turn, recording each as it succeeds. The first refusal or failure stops
