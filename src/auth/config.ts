@@ -8,7 +8,7 @@ export interface Config {
   redirectUri: string;
 }
 
-export const SCOPES = ['tweet.read', 'users.read', 'follows.read', 'offline.access'] as const;
+export const SCOPES = ['tweet.read', 'users.read', 'follows.read', 'follows.write', 'offline.access'] as const;
 
 const DEFAULT_PORT = 8765;
 

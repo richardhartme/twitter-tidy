@@ -9,6 +9,8 @@ export interface Tokens {
   expiresAt: number;
   userId: string;
   handle: string;
+  /** The scopes X granted; absent in logins saved before they were recorded. */
+  scopes?: string[];
 }
 
 export const defaultTokenPath = () => join(homedir(), '.config', 'twittertidy', 'tokens.json');

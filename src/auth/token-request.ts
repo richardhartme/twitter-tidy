@@ -7,6 +7,8 @@ export interface TokenGrant {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
+  /** The scopes X granted, when the response names them. */
+  scopes?: string[];
 }
 
 type Deps = { fetch: typeof fetch; now: () => number };
@@ -25,11 +27,13 @@ async function requestTokens(config: Config, deps: Deps, body: Record<string, st
   if (!res.ok) {
     throw new TokenRequestError(`X token endpoint returned ${res.status}: ${await res.text()}`, res.status);
   }
-  const json = (await res.json()) as { access_token: string; refresh_token: string; expires_in: number };
+  const json = (await res.json()) as { access_token: string; refresh_token: string; expires_in: number; scope?: string };
   return {
     accessToken: json.access_token,
     refreshToken: json.refresh_token,
     expiresAt: deps.now() + json.expires_in * 1000,
+    // A refresh that doesn't name its scopes keeps the ones already recorded.
+    ...(json.scope ? { scopes: json.scope.split(' ') } : {}),
   };
 }
 

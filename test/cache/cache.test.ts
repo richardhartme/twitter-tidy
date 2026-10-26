@@ -1,7 +1,9 @@
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, onTestFinished, test } from 'vitest';
+import { MIGRATIONS } from '../../src/cache/migrations.js';
 import {
   DEFAULT_INACTIVITY_MS,
   defaultCachePath,
@@ -52,6 +54,23 @@ describe('openCache on a file', () => {
     expect(second.schemaVersion).toBe(version);
     expect(second.listFollowing().map((r) => r.id)).toEqual(['1']);
     second.close();
+  });
+
+  test('upgrading a version 1 cache counts its removed accounts as found by a refresh', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tt-cache-'));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const path = join(root, 'cache.db');
+    const v1 = new Database(path);
+    v1.exec(MIGRATIONS[0]!);
+    v1.pragma('user_version = 1');
+    v1.exec(`INSERT INTO accounts (id, handle, name, fetched_at) VALUES ('1', 'user1', 'User 1', 0), ('2', 'user2', 'User 2', 0);
+             INSERT INTO following (account_id, first_seen_at, removed_at) VALUES ('1', 0, NULL), ('2', 0, 5);`);
+    v1.close();
+
+    const cache = openCache({ path });
+    expect(cache.listRemoved().map((r) => [r.id, r.removedBy])).toEqual([['2', 'refresh']]);
+    expect(cache.listFollowing().map((r) => r.id)).toEqual(['1']);
+    cache.close();
   });
 
   test('defaults to cache.db beside the token file', () => {
@@ -139,6 +158,50 @@ describe('applyFollowing', () => {
       ['2', 'renamed', 99, false],
       ['1', 'user1', 10, false],
     ]);
+  });
+});
+
+describe('recordUnfollow', () => {
+  test('an unfollowed account leaves the Following list at once, removed by the app', () => {
+    const { cache, clock } = setup();
+    cache.applyFollowing([profile('1'), profile('2')]);
+    clock.advance(DAY);
+    cache.recordUnfollow('2');
+    expect(cache.listFollowing().map((r) => r.id)).toEqual(['1']);
+    expect(cache.listRemoved().map((r) => [r.id, r.removedAt, r.removedBy, r.recentlyRemoved])).toEqual([
+      ['2', clock.now(), 'app', false],
+    ]);
+  });
+
+  test('accounts a refresh finds missing are removed by the refresh', () => {
+    const { cache } = setup();
+    cache.applyFollowing([profile('1'), profile('2')]);
+    cache.applyFollowing([profile('1')]);
+    expect(cache.listRemoved().map((r) => r.removedBy)).toEqual(['refresh']);
+  });
+
+  test('a later refresh keeps the unfollow as the app\'s, and a re-follow clears it', () => {
+    const { cache, clock } = setup();
+    cache.applyFollowing([profile('1'), profile('2')]);
+    cache.recordUnfollow('2');
+    clock.advance(DAY);
+    cache.applyFollowing([profile('1')]);
+    expect(cache.listRemoved().map((r) => r.removedBy)).toEqual(['app']);
+
+    cache.applyFollowing([profile('1'), profile('2')]);
+    cache.applyFollowing([profile('1')]);
+    expect(cache.listRemoved().map((r) => r.removedBy)).toEqual(['refresh']);
+  });
+
+  test('unfollowing an account already removed, or unknown, changes nothing', () => {
+    const { cache, clock } = setup();
+    cache.applyFollowing([profile('1'), profile('2')]);
+    cache.applyFollowing([profile('1')]);
+    const before = cache.listRemoved();
+    clock.advance(DAY);
+    cache.recordUnfollow('2');
+    cache.recordUnfollow('nope');
+    expect(cache.listRemoved()).toEqual(before);
   });
 });
 

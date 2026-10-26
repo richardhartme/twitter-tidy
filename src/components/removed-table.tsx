@@ -14,6 +14,13 @@ const columns: GridColumn<RemovedAccount>[] = [
   },
   { key: 'name', heading: 'Name', width: 28, align: 'left', cell: (a) => a.name },
   { key: 'removed', heading: 'Removed ▼', width: 14, align: 'left', cell: (a) => formatDate(a.removedAt) },
+  {
+    key: 'how',
+    heading: 'How',
+    width: 12,
+    align: 'left',
+    cell: (a) => (a.removedBy === 'app' ? 'unfollowed' : 'gone'),
+  },
 ];
 
 /** The keys the removed view answers to. */

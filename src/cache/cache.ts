@@ -48,9 +48,13 @@ export interface PulledAccount extends AccountProfile {
   lastPost: LastPostResult | null;
 }
 
+/** Who removed a followed account: the app unfollowing it, or a refresh finding it missing. */
+export type RemovedBy = 'app' | 'refresh';
+
 export interface RemovedAccount extends AccountProfile {
   /** Epoch milliseconds. */
   removedAt: number;
+  removedBy: RemovedBy;
   /** Removed by the most recent Following refresh; clears on the next one. */
   recentlyRemoved: boolean;
 }
@@ -142,9 +146,14 @@ export function openCache({ path = defaultCachePath(), now: clock = Date.now }: 
   const anyEverFollowed = db.prepare('SELECT EXISTS (SELECT 1 FROM following)').pluck();
   const clearNew = db.prepare('UPDATE following SET is_new = 0 WHERE is_new = 1');
   const selectActiveIds = db.prepare('SELECT account_id FROM following WHERE removed_at IS NULL').pluck();
-  const softRemove = db.prepare('UPDATE following SET removed_at = ? WHERE account_id = ?');
+  const softRemove = db.prepare(
+    "UPDATE following SET removed_at = ?, removed_by = 'refresh' WHERE account_id = ?",
+  );
+  const unfollow = db.prepare(
+    "UPDATE following SET removed_at = ?, removed_by = 'app', is_new = 0 WHERE account_id = ? AND removed_at IS NULL",
+  );
   const restore = db.prepare(
-    'UPDATE following SET removed_at = NULL WHERE account_id = ? AND removed_at IS NOT NULL',
+    'UPDATE following SET removed_at = NULL, removed_by = NULL WHERE account_id = ? AND removed_at IS NOT NULL',
   );
   const selectFollowing = db.prepare(`
     SELECT a.*, f.is_new,
@@ -166,8 +175,9 @@ export function openCache({ path = defaultCachePath(), now: clock = Date.now }: 
   );
   const selectSynced = db.prepare('SELECT synced_at FROM sync_state WHERE key = ?').pluck();
   const selectRemoved = db.prepare(`
-    SELECT a.*, f.removed_at,
-      f.removed_at = (SELECT synced_at FROM sync_state WHERE key = @followingSync) AS recently_removed
+    SELECT a.*, f.removed_at, f.removed_by,
+      f.removed_by = 'refresh' AND f.removed_at = (SELECT synced_at FROM sync_state WHERE key = @followingSync)
+        AS recently_removed
     FROM following f JOIN accounts a ON a.id = f.account_id
     WHERE f.removed_at IS NOT NULL ORDER BY f.removed_at DESC, a.handle COLLATE NOCASE`);
   const selectStale = db.prepare(`
@@ -253,6 +263,11 @@ export function openCache({ path = defaultCachePath(), now: clock = Date.now }: 
       }));
     },
 
+    /** Records that the app unfollowed an account: it leaves the Following list at once, without a refresh. */
+    recordUnfollow(accountId: string): void {
+      unfollow.run(clock(), accountId);
+    },
+
     /** Stores the result of checking an account's newest post. */
     recordLastPost(accountId: string, result: LastPostResult): void {
       upsertLastPost.run(accountId, result.status === 'ok' ? result.postedAt : null, clock(), result.status);
@@ -289,10 +304,11 @@ export function openCache({ path = defaultCachePath(), now: clock = Date.now }: 
 
     /** Accounts no longer followed, most recently removed first. */
     listRemoved(): RemovedAccount[] {
-      type RemovedRow = AccountRow & { removed_at: number; recently_removed: number | null };
+      type RemovedRow = AccountRow & { removed_at: number; removed_by: RemovedBy; recently_removed: number | null };
       return (selectRemoved.all({ followingSync: FOLLOWING_SYNC }) as RemovedRow[]).map((r) => ({
         ...toProfile(r),
         removedAt: r.removed_at,
+        removedBy: r.removed_by,
         recentlyRemoved: r.recently_removed === 1,
       }));
     },

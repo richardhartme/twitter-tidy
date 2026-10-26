@@ -1,7 +1,7 @@
 import type { Database } from 'better-sqlite3';
 
 /** Ordered schema migrations; migration N (1-based) moves `user_version` from N-1 to N. */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `
   CREATE TABLE accounts (
     id TEXT PRIMARY KEY,
@@ -39,6 +39,11 @@ const MIGRATIONS: string[] = [
     key TEXT PRIMARY KEY,
     synced_at INTEGER NOT NULL
   );
+  `,
+  // Who removed each account: the app unfollowing it, or a refresh finding it missing.
+  `
+  ALTER TABLE following ADD COLUMN removed_by TEXT CHECK (removed_by IN ('app', 'refresh'));
+  UPDATE following SET removed_by = 'refresh' WHERE removed_at IS NOT NULL;
   `,
 ];
 

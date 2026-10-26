@@ -30,9 +30,14 @@ const UP = '\u001B[A';
 const PAGE_DOWN = '\u001B[6~';
 const BACKSPACE = '\u007F';
 
-const removedAccount = (handle: string, removedAt: string, recentlyRemoved = false): RemovedAccount => {
+const removedAccount = (
+  handle: string,
+  removedAt: string,
+  recentlyRemoved = false,
+  removedBy: RemovedAccount['removedBy'] = 'refresh',
+): RemovedAccount => {
   const { isNew: _isNew, followsBack: _followsBack, lastPost: _lastPost, ...profile } = account(handle);
-  return { ...profile, removedAt: Date.parse(removedAt), recentlyRemoved };
+  return { ...profile, removedAt: Date.parse(removedAt), removedBy, recentlyRemoved };
 };
 
 function setup(
@@ -262,6 +267,19 @@ describe('FollowingTable refresh flags', () => {
 
     await press('x');
     expect(rows()).toEqual(['kept']);
+  });
+
+  test('the removed view says whether each account was unfollowed here or found gone by a refresh', async () => {
+    const { press, lastFrame } = setup([account('kept')], {
+      removed: [
+        removedAccount('mine', '2026-10-20T12:00:00Z', false, 'app'),
+        removedAccount('left', '2026-09-01T12:00:00Z', false, 'refresh'),
+      ],
+    });
+    await press('x');
+    expect(lastFrame()).toMatch(/How/);
+    expect(lastFrame()).toMatch(/@mine .*unfollowed/);
+    expect(lastFrame()).toMatch(/@left .*gone/);
   });
 
   test('search applies in the removed view', async () => {

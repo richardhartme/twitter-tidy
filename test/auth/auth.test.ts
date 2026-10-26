@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { createXClient } from '../../src/auth/client.js';
+import { connect } from '../../src/auth/index.js';
 import { loadConfig, type Config } from '../../src/auth/config.js';
 import { AuthError, ConfigError } from '../../src/auth/errors.js';
 import { login } from '../../src/auth/login.js';
@@ -36,9 +37,9 @@ describe('PKCE', () => {
     expect(v).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(generateVerifier()).not.toBe(v);
   });
-  test('authorize URL has exactly the four scopes, S256 and state', () => {
+  test('authorize URL has exactly the five scopes, S256 and state', () => {
     const u = new URL(buildAuthorizeUrl(config, 'chal', 'st'));
-    expect(u.searchParams.get('scope')).toBe('tweet.read users.read follows.read offline.access');
+    expect(u.searchParams.get('scope')).toBe('tweet.read users.read follows.read follows.write offline.access');
     expect(u.searchParams.get('code_challenge')).toBe('chal');
     expect(u.searchParams.get('code_challenge_method')).toBe('S256');
     expect(u.searchParams.get('state')).toBe('st');
@@ -57,6 +58,10 @@ describe('token requests', () => {
     expect(body.get('client_id')).toBe('cid');
     expect(body.get('code_verifier')).toBe('ver');
     expect(grant).toEqual({ accessToken: 'new', refreshToken: 'r2', expiresAt: 1000 + 7200_000 });
+  });
+  test('records the scopes X granted, when the response says', async () => {
+    const f = vi.fn(async () => json({ ...grantBody, scope: 'tweet.read follows.write' }));
+    expect(await exchangeCode(config, deps(f as never), 'c', 'v')).toMatchObject({ scopes: ['tweet.read', 'follows.write'] });
   });
   test('confidential client uses HTTP Basic', async () => {
     const f = vi.fn(async () => json(grantBody));
@@ -79,6 +84,36 @@ describe('TokenStore', () => {
     const dir = await mkdtemp(join(tmpdir(), 'tt-'));
     await writeFile(join(dir, 't.json'), '{nope');
     expect(await new TokenStore(join(dir, 't.json')).load()).toBeNull();
+  });
+});
+
+describe('connect', () => {
+  const allScopes = ['tweet.read', 'users.read', 'follows.read', 'follows.write', 'offline.access'];
+  const fresh: Tokens = { ...tokens, accessToken: 'fresh', scopes: allScopes };
+  const run = async (saved: Tokens | null) => {
+    const dir = await mkdtemp(join(tmpdir(), 'tt-'));
+    const store = new TokenStore(join(dir, 'tokens.json'));
+    if (saved) await store.save(saved);
+    const signIn = vi.fn(async () => fresh);
+    const client = await connect(config, store, { signIn });
+    return { client, signIn, store };
+  };
+
+  test('reuses saved tokens that carry every scope', async () => {
+    const { client, signIn } = await run({ ...tokens, scopes: allScopes });
+    expect(signIn).not.toHaveBeenCalled();
+    expect(client.tokens.accessToken).toBe('old');
+  });
+
+  test.each([
+    ['no tokens', null],
+    ['tokens from before scopes were recorded', tokens],
+    ['tokens without follows.write', { ...tokens, scopes: allScopes.filter((s) => s !== 'follows.write') }],
+  ])('signs in again for %s, and saves the new tokens', async (_, saved) => {
+    const { client, signIn, store } = await run(saved);
+    expect(signIn).toHaveBeenCalledTimes(1);
+    expect(client.tokens.accessToken).toBe('fresh');
+    expect(await store.load()).toEqual(fresh);
   });
 });
 
@@ -115,7 +150,7 @@ describe('login', () => {
 });
 
 describe('createXClient', () => {
-  const setup = (responses: Response[], overrides: { now?: () => number } = {}) => {
+  const setup = (responses: Response[], overrides: { now?: () => number } = {}, saved: Tokens = tokens) => {
     const queue = [...responses];
     const calls: { url: string; auth: string | null }[] = [];
     const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -126,7 +161,7 @@ describe('createXClient', () => {
     });
     const store = { save: vi.fn(async () => {}) } as unknown as TokenStore;
     const sleep = vi.fn(async () => {});
-    const client = createXClient({ config, store, tokens, fetch: f as never, now: overrides.now ?? (() => 1_000_000), sleep });
+    const client = createXClient({ config, store, tokens: saved, fetch: f as never, now: overrides.now ?? (() => 1_000_000), sleep });
     return { client, calls, store, sleep, f };
   };
 
@@ -136,6 +171,12 @@ describe('createXClient', () => {
     expect(res.status).toBe(200);
     expect(calls.map((c) => c.auth)).toEqual(['Bearer old', 'Bearer new']);
     expect(store.save).toHaveBeenCalledWith(expect.objectContaining({ accessToken: 'new', refreshToken: 'r2' }));
+  });
+
+  test('a refresh that names no scopes keeps the ones already granted', async () => {
+    const { client } = setup([new Response(null, { status: 401 }), json(grantBody), json({ ok: 1 })], {}, { ...tokens, scopes: ['a'] });
+    await client.fetch('/x');
+    expect(client.tokens.scopes).toEqual(['a']);
   });
 
   test('a failed refresh asks the user to log in again', async () => {
