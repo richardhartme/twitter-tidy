@@ -8,6 +8,7 @@ import { FollowingRefresh } from './components/following-refresh.js';
 import { FollowingTable, TABLE_CHROME } from './components/following-table.js';
 import { Header } from './components/header.js';
 import { LastPostBulkFetch } from './components/last-post-bulk-fetch.js';
+import { UnfollowBatch } from './components/unfollow-batch.js';
 import { createRateLimiter, fetchLastPostMessage, type RateLimiter } from './following/index.js';
 import { UNFOLLOW_RATE_LIMIT, unfollowMessage } from './unfollow/index.js';
 
@@ -15,7 +16,7 @@ import { UNFOLLOW_RATE_LIMIT, unfollowMessage } from './unfollow/index.js';
 const APP_CHROME = 2 + 4;
 const FALLBACK_ROWS = 24;
 
-type Screen = 'table' | 'refresh-following' | 'refresh-followers' | 'fetch-last-posts';
+type Screen = 'table' | 'refresh-following' | 'refresh-followers' | 'fetch-last-posts' | 'unfollow-marked';
 
 /** The accounts a bulk last-tweet fetch (`a` or `b`) covers, and its prompt's title. */
 interface Batch {
@@ -66,10 +67,18 @@ export function App({
     setBatch(next);
     setScreen('fetch-last-posts');
   };
+  /** Ids of the rows marked with space, kept here so they outlast the batch screens. */
+  const [marks, setMarks] = useState<ReadonlySet<string>>(new Set());
+  /** The marked accounts a `U` run covers, and how many of them the table was hiding. */
+  const [unfollowBatch, setUnfollowBatch] = useState({ accounts: [] as AccountProfile[], hidden: 0 });
 
   /** Re-reads the table after anything that may have changed the cache. */
   const reload = () => {
-    setAccounts(cache.listFollowing());
+    const following = cache.listFollowing();
+    setAccounts(following);
+    // Marks on accounts no longer followed (unfollowed, or gone in a refresh) are dropped.
+    const followed = new Set(following.map((a) => a.id));
+    setMarks((m) => new Set([...m].filter((id) => followed.has(id))));
     setRemoved(cache.listRemoved());
     setHasFollowers(cache.hasFollowers());
   };
@@ -103,6 +112,15 @@ export function App({
           limiter={limiter}
           onDone={backToTable}
         />
+      ) : screen === 'unfollow-marked' ? (
+        <UnfollowBatch
+          client={client}
+          cache={cache}
+          userId={userId}
+          {...unfollowBatch}
+          limiter={unfollowLimiter}
+          onDone={backToTable}
+        />
       ) : (
         <FollowingTable
           accounts={accounts}
@@ -130,6 +148,12 @@ export function App({
               accounts: cache.staleAccounts({ inactiveAfterMs }),
             })
           }
+          marks={marks}
+          onMarksChange={setMarks}
+          onUnfollowMarked={(marked, hidden) => {
+            setUnfollowBatch({ accounts: marked, hidden });
+            setScreen('unfollow-marked');
+          }}
           onFetchMarked={(marked) =>
             fetchBatch({
               title: `Fetch last tweets for ${marked.length} marked ${marked.length === 1 ? 'account' : 'accounts'}`,

@@ -56,6 +56,8 @@ export async function unfollowAccount({
       rateLimitOptions,
     );
   } catch (err) {
+    // A stopped run's wait for the limiter: leave it for the caller to treat as stopped.
+    if (err instanceof Error && err.name === 'AbortError') throw err;
     throw new UnfollowError(`Couldn't unfollow ${who}: ${(err as Error).message}`, 'failed');
   }
   if (res.ok || res.status === 404) {

@@ -431,3 +431,88 @@ describe('Unfollow one account (u)', () => {
     expect(refused.lastFrame()).toContain('❯ @user1');
   });
 });
+
+describe('Unfollow marked accounts (U)', () => {
+  const DOWN = '\u001B[B';
+  const ENTER = '\r';
+
+  function setupBatch(respond: (path: string) => Response = () => json({ data: { following: false } })) {
+    const cache = openCache({ path: ':memory:' });
+    cache.applyFollowing(['1', '2', '3'].map(profile));
+    const fetch = vi.fn(async (path: string, _init?: RequestInit) => respond(path));
+    const client = { fetch, tokens: {} } as unknown as XClient;
+    const app = render(<App client={client} cache={cache} userId="42" height={5} />);
+    const deletes = () => fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE').map(([path]) => path);
+    /** Marks user1 and user3. */
+    const markOneAndThree = async () => {
+      await tick();
+      await press(app.stdin, ' ');
+      await press(app.stdin, DOWN);
+      await press(app.stdin, ' ');
+    };
+    return { ...app, deletes, markOneAndThree };
+  }
+
+  test('with nothing marked, says how to mark', async () => {
+    const { stdin, lastFrame, deletes } = setupBatch();
+    await tick();
+    await press(stdin, 'U');
+    expect(lastFrame()).toContain('Mark rows with space, then press U');
+    expect(deletes()).toEqual([]);
+  });
+
+  test('asks first, listing the handles and cost; cancelling keeps the marks', async () => {
+    const { stdin, lastFrame, deletes, markOneAndThree } = setupBatch();
+    await markOneAndThree();
+    await press(stdin, 'U');
+    expect(lastFrame()).toContain('Unfollow 2 marked accounts?');
+    expect(lastFrame()).toContain('@user1, @user3');
+    expect(lastFrame()).toContain('About $0.02');
+    await press(stdin, ENTER);
+    expect(lastFrame()).toContain('2 marked');
+    expect(deletes()).toEqual([]);
+  });
+
+  test('y unfollows every marked account and clears their marks', async () => {
+    const { stdin, lastFrame, deletes, markOneAndThree } = setupBatch();
+    await markOneAndThree();
+    await press(stdin, 'U');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toContain('Unfollowed 2 accounts'));
+    expect(deletes()).toEqual(['/2/users/42/following/1', '/2/users/42/following/3']);
+    await press(stdin, ENTER);
+    expect(lastFrame()).toContain('1 accounts');
+    expect(lastFrame()).not.toMatch(/\d marked/);
+  });
+
+  test('includes marked accounts the current search hides, and says so', async () => {
+    const { stdin, lastFrame, markOneAndThree } = setupBatch();
+    await markOneAndThree();
+    for (const key of ['/', 'u', 's', 'e', 'r', '2', ENTER]) await press(stdin, key);
+    await press(stdin, 'U');
+    expect(lastFrame()).toContain('Unfollow 2 marked accounts?');
+    expect(lastFrame()).toContain('2 of them are not shown by the current view');
+  });
+
+  test('a refusal stops the run; accounts not unfollowed stay marked, and U again carries on', async () => {
+    let refuse = true;
+    const { stdin, lastFrame, deletes, markOneAndThree } = setupBatch((path) =>
+      refuse && path.endsWith('/3') ? json({ detail: 'Not permitted.' }, { status: 403 }) : json({ data: { following: false } }),
+    );
+    await markOneAndThree();
+    await press(stdin, 'U');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toMatch(/Not permitted/));
+    expect(lastFrame()).toContain('1 of 2');
+    await press(stdin, ENTER);
+    expect(lastFrame()).toContain('1 marked');
+    expect(lastFrame()).not.toContain('@user1');
+
+    refuse = false;
+    await press(stdin, 'U');
+    expect(lastFrame()).toContain('Unfollow @user3?');
+    await press(stdin, 'y');
+    await vi.waitFor(() => expect(lastFrame()).toContain('Unfollowed 1 account'));
+    expect(deletes()).toEqual(['/2/users/42/following/1', '/2/users/42/following/3', '/2/users/42/following/3']);
+  });
+});

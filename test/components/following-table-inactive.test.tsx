@@ -42,7 +42,10 @@ function setup(accounts: FollowedAccount[], { inactiveAfterMs }: { inactiveAfter
       onRefreshFollowers={vi.fn()}
       onFetchLastPost={vi.fn(async () => '')}
       onFetchStale={vi.fn()}
+      marks={new Set()}
+      onMarksChange={vi.fn()}
       onFetchMarked={vi.fn()}
+      onUnfollowMarked={vi.fn()}
       onUnfollow={vi.fn()}
       onOpenProfile={vi.fn()}
       inactiveAfterMs={inactiveAfterMs}

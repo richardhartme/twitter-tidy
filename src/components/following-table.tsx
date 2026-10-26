@@ -33,8 +33,13 @@ interface FollowingTableProps {
   onFetchLastPost: (account: FollowedAccount) => Promise<string>;
   /** Fetches the last tweet for every stale account (`a`). */
   onFetchStale: () => void;
+  /** Ids of the rows marked with space; kept by the app so they outlast a batch screen. */
+  marks: ReadonlySet<string>;
+  onMarksChange: (marks: ReadonlySet<string>) => void;
   /** Fetches the last tweet for the rows marked with space (`b`). */
   onFetchMarked: (accounts: FollowedAccount[]) => void;
+  /** Unfollows every marked account (`U`); `hidden` counts those the search or filters hide. */
+  onUnfollowMarked: (accounts: FollowedAccount[], hidden: number) => void;
   /** Unfollows one confirmed account (`u`), resolving to a status-bar message. */
   onUnfollow: (account: FollowedAccount) => Promise<string>;
   /** Opens an account's profile in the system browser (`o`). */
@@ -80,7 +85,7 @@ const TABLE_KEYS = [
   'enter details',
   'o open',
   'l last tweet',
-  'u unfollow',
+  'u/U unfollow/marked',
   'space mark',
   'b/a fetch marked/stale',
   'r refresh',
@@ -91,6 +96,7 @@ const SEARCH_KEYS = ['type to search', 'enter keep', 'esc clear'];
 const DETAIL_KEYS = ['o open', 'u unfollow', 'esc back', 'q quit'];
 const NO_FOLLOWERS_HINT = 'Follow-back is unknown until your followers have been pulled';
 const NO_MARKS_HINT = 'Mark rows with space, then press b to fetch their last tweets';
+const NO_MARKS_UNFOLLOW_HINT = 'Mark rows with space, then press U to unfollow them';
 
 /** The main screen: every followed account from the cache, sortable, searchable and filterable. */
 export function FollowingTable({
@@ -103,14 +109,15 @@ export function FollowingTable({
   onRefreshFollowers,
   onFetchLastPost,
   onFetchStale,
+  marks,
+  onMarksChange,
   onFetchMarked,
+  onUnfollowMarked,
   onUnfollow,
   onOpenProfile,
   inactiveAfterMs,
   now = Date.now,
 }: FollowingTableProps) {
-  /** Ids of the rows marked for a batch fetch. */
-  const [marks, setMarks] = useState<ReadonlySet<string>>(new Set());
   const [sort, setSort] = useState<Sort>({ key: 'handle', descending: false });
   const [search, setSearch] = useState('');
   const [typing, setTyping] = useState(false);
@@ -227,18 +234,23 @@ export function FollowingTable({
     if (input === ' ') {
       const row = rows[cursor];
       if (!row) return;
-      setMarks((m) => {
-        const next = new Set(m);
-        if (!next.delete(row.id)) next.add(row.id);
-        return next;
-      });
+      const next = new Set(marks);
+      if (!next.delete(row.id)) next.add(row.id);
+      onMarksChange(next);
       return moveTo(cursor + 1);
     }
     if (input === 'b') {
       const marked = accounts.filter((a) => marks.has(a.id));
       if (marked.length === 0) return setHint(NO_MARKS_HINT);
-      setMarks(new Set());
+      onMarksChange(new Set());
       return onFetchMarked(marked);
+    }
+    if (input === 'U') {
+      // Every marked account, including those the search or filters hide.
+      const marked = accounts.filter((a) => marks.has(a.id));
+      if (marked.length === 0) return setHint(NO_MARKS_UNFOLLOW_HINT);
+      const shown = new Set(rows.map((r) => r.id));
+      return onUnfollowMarked(marked, marked.filter((a) => !shown.has(a.id)).length);
     }
     if (input === 'a') return onFetchStale();
     if (input === 'i') return reshape(() => setInactiveOnly((on) => !on));

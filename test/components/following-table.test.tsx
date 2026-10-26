@@ -60,7 +60,10 @@ function setup(
       onRefreshFollowers={onRefreshFollowers}
       onFetchLastPost={onFetchLastPost}
       onFetchStale={vi.fn()}
+      marks={new Set()}
+      onMarksChange={vi.fn()}
       onFetchMarked={vi.fn()}
+      onUnfollowMarked={vi.fn()}
       onUnfollow={vi.fn()}
       onOpenProfile={onOpenProfile}
     />,
